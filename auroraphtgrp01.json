@@ -1,0 +1,6 @@
+{
+  "model": "gemini-2.0-flash",
+  "temperature": 0.5,
+  "maxTokens": 10000,
+  "geminiToken": "AIzaSyDzDa65wOVFDs5rXzcAonV6-6IsCIrD560"
+}

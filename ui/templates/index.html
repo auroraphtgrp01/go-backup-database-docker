@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý Backup Database</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container my-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h1 class="h3 mb-0">Công cụ Backup và Upload Database</h1>
+            </div>
+            <div class="card-body">
+                {{if .NeedAuth}}
+                <div class="alert alert-warning">
+                    <strong>Cần xác thực!</strong> Để sử dụng tính năng upload lên Google Drive, bạn cần xác thực tài khoản Google.
+                    <div class="mt-2">
+                        <button onclick="openAuthWindow()" class="btn btn-primary">Xác thực ngay</button>
+                    </div>
+                </div>
+                {{end}}
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card mb-4">
+                            <div class="card-header bg-info text-white">
+                                <h5 class="mb-0">Dump Database</h5>
+                            </div>
+                            <div class="card-body">
+                                <p>Tạo bản sao lưu dữ liệu từ container Docker và lưu vào thư mục local.</p>
+                                <form action="/dump" method="POST">
+                                    <button type="submit" class="btn btn-primary">Dump Database</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card mb-4">
+                            <div class="card-header bg-success text-white">
+                                <h5 class="mb-0">Upload lên Google Drive</h5>
+                            </div>
+                            <div class="card-body">
+                                <p>Upload file backup mới nhất hoặc tất cả các file backup lên Google Drive.</p>
+                                <div class="d-flex gap-2">
+                                    <form action="/upload-last" method="POST">
+                                        <button type="submit" class="btn btn-success" {{if .NeedAuth}}disabled{{end}}>Upload File Mới Nhất</button>
+                                    </form>
+                                    <form action="/upload-all" method="POST">
+                                        <button type="submit" class="btn btn-outline-success" {{if .NeedAuth}}disabled{{end}}>Upload Tất Cả</button>
+                                    </form>
+                                </div>
+                                {{if .NeedAuth}}
+                                <div class="mt-2 text-danger small">
+                                    <i class="bi bi-exclamation-triangle"></i> Vui lòng xác thực tài khoản Google trước khi upload
+                                </div>
+                                {{end}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                {{if not .NeedAuth}}
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">Danh sách file backup</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Tên file</th>
+                                        <th>Ngày tạo</th>
+                                        <th>Kích thước</th>
+                                        <th>Đã upload</th>
+                                        <th>Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .Backups}}
+                                    <tr>
+                                        <td>{{.Name}}</td>
+                                        <td>{{.CreatedAt}}</td>
+                                        <td>{{.Size}}</td>
+                                        <td>
+                                            {{if .Uploaded}}
+                                            <span class="badge bg-success">Đã upload</span>
+                                            {{else}}
+                                            <span class="badge bg-warning">Chưa upload</span>
+                                            {{end}}
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                <a href="/download/{{.ID}}" class="btn btn-outline-primary">Tải xuống</a>
+                                                {{if not .Uploaded}}
+                                                <form action="/upload/{{.ID}}" method="POST">
+                                                    <button type="submit" class="btn btn-outline-success">Upload</button>
+                                                </form>
+                                                {{end}}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {{else}}
+                                    <tr>
+                                        <td colspan="5" class="text-center py-3">Chưa có file backup nào</td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+                
+                {{if .LastOperation}}
+                <div class="alert alert-{{if .LastOperation.Success}}success{{else}}danger{{end}} alert-dismissible fade show" role="alert">
+                    <strong>{{if .LastOperation.Success}}Thành công!{{else}}Lỗi!{{end}}</strong> {{.LastOperation.Message}}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                {{end}}
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/script.js"></script>
+    <script>
+        function openAuthWindow() {
+            // Mở cửa sổ mới để xác thực Google
+            const authWindow = window.open("/auth", "GoogleAuth", 
+                "width=600,height=700,menubar=no,toolbar=no,location=no,status=no");
+            
+            // Theo dõi cửa sổ xác thực
+            const checkWindow = setInterval(function() {
+                if (authWindow.closed) {
+                    clearInterval(checkWindow);
+                    // Làm mới trang sau khi cửa sổ đóng để cập nhật trạng thái
+                    window.location.reload();
+                }
+            }, 500);
+        }
+    </script>
+</body>
+</html> 
