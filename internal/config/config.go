@@ -21,6 +21,10 @@ type Config struct {
 	BackupDir          string
 	TokenDir           string
 	WebAppPort         string
+	AdminUsername      string
+	AdminPassword      string
+	JWTSecret          string
+	SQLiteDBPath       string
 }
 
 // LoadConfig nạp cấu hình từ file .env
@@ -40,15 +44,26 @@ func LoadConfig() (*Config, error) {
 	// Thiết lập đường dẫn các thư mục
 	backupDir := filepath.Join(rootDir, "backups")
 	tokenDir := filepath.Join(rootDir, "token")
+	dataDir := filepath.Join(rootDir, "data")
 
 	// Đảm bảo các thư mục tồn tại
 	os.MkdirAll(backupDir, 0755)
 	os.MkdirAll(tokenDir, 0755)
+	os.MkdirAll(dataDir, 0755)
+
+	// Đường dẫn đến SQLite database
+	sqliteDBPath := filepath.Join(dataDir, "app.db")
 
 	// Lấy giá trị port hoặc sử dụng mặc định
 	webAppPort := os.Getenv("WEBAPP_PORT")
 	if webAppPort == "" {
 		webAppPort = "8080"
+	}
+
+	// JWT Secret mặc định nếu không được cấu hình
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "default_jwt_secret_please_change_in_production"
 	}
 
 	// Lấy giá trị từ các biến môi trường
@@ -64,6 +79,10 @@ func LoadConfig() (*Config, error) {
 		BackupDir:          backupDir,
 		TokenDir:           tokenDir,
 		WebAppPort:         webAppPort,
+		AdminUsername:      os.Getenv("ADMIN_USERNAME"),
+		AdminPassword:      os.Getenv("ADMIN_PASSWORD"),
+		JWTSecret:          jwtSecret,
+		SQLiteDBPath:       sqliteDBPath,
 	}
 
 	// Kiểm tra các biến bắt buộc
@@ -73,6 +92,11 @@ func LoadConfig() (*Config, error) {
 
 	if config.GoogleClientID == "" || config.GoogleClientSecret == "" || config.FolderDrive == "" {
 		return nil, fmt.Errorf("missing required Google Drive environment variables")
+	}
+
+	// Kiểm tra tài khoản admin
+	if config.AdminUsername == "" || config.AdminPassword == "" {
+		return nil, fmt.Errorf("missing required Admin credentials: ADMIN_USERNAME, ADMIN_PASSWORD")
 	}
 
 	return config, nil

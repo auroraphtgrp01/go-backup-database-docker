@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng nhập | Backup Database</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-form {
+            max-width: 400px;
+            width: 90%;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+            background-color: #fff;
+        }
+        .login-form h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .login-form .logo {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .login-form .logo i {
+            font-size: 48px;
+            color: #0d6efd;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-form">
+        <div class="logo">
+            <i class="bi bi-database-fill-lock"></i>
+        </div>
+        <h1>Đăng nhập</h1>
+        <div id="login-error" class="alert alert-danger d-none" role="alert"></div>
+        <form id="login-form">
+            <div class="mb-3">
+                <label for="username" class="form-label">Tên đăng nhập</label>
+                <input type="text" class="form-control" id="username" name="username" required>
+            </div>
+            <div class="mb-3">
+                <label for="password" class="form-label">Mật khẩu</label>
+                <input type="password" class="form-control" id="password" name="password" required>
+            </div>
+            <div class="d-grid">
+                <button type="submit" class="btn btn-primary btn-block">Đăng nhập</button>
+            </div>
+        </form>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        // Hàm để đọc cookie
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return null;
+        }
+        
+        $(document).ready(function() {
+            // Kiểm tra nếu người dùng đã đăng nhập, chuyển hướng về trang chủ
+            const token = localStorage.getItem('auth_token');
+            const loginCookie = getCookie('logged_in');
+            
+            console.log('🔍 Kiểm tra trạng thái đăng nhập - token:', !!token, 'cookie:', loginCookie);
+            
+            if (token && loginCookie === 'true') {
+                console.log('👤 Người dùng đã đăng nhập, chuyển hướng về trang chủ');
+                window.location.href = '/';
+                return;
+            }
+            
+            // Tự động focus vào trường username khi trang tải xong
+            $('#username').focus();
+
+            $('#login-form').submit(function(event) {
+                event.preventDefault();
+                
+                // Hiển thị trạng thái đang xử lý đăng nhập
+                $('#login-error').html('<div class="alert alert-info">Đang đăng nhập...</div>');
+                
+                // Thu thập dữ liệu đăng nhập
+                var loginData = {
+                    username: $('#username').val(),
+                    password: $('#password').val()
+                };
+                
+                // Gửi yêu cầu đăng nhập
+                $.ajax({
+                    type: 'POST',
+                    url: '/login',
+                    contentType: 'application/json',
+                    data: JSON.stringify(loginData),
+                    success: function(response) {
+                        console.log('✅ Đăng nhập thành công:', response);
+                        
+                        // Lưu token vào localStorage (Bước 1)
+                        try {
+                            localStorage.setItem('auth_token', response.token);
+                            localStorage.setItem('user', JSON.stringify({
+                                username: loginData.username
+                            }));
+                            console.log('✅ Đã lưu token vào localStorage');
+                        } catch (e) {
+                            console.error('⚠️ Không thể lưu vào localStorage:', e);
+                            // Tiếp tục mà không hiển thị thông báo lỗi cho người dùng
+                        }
+                        
+                        // Kiểm tra cookie (Bước 2)
+                        setTimeout(function() {
+                            const loginCookie = getCookie('logged_in');
+                            const authCookie = getCookie('auth_token');
+                            console.log('🍪 Kiểm tra cookie sau đăng nhập - logged_in:', loginCookie, 'auth_token:', !!authCookie);
+                            
+                            // Nếu cookie không được đặt, thử đặt lại
+                            if (loginCookie !== 'true') {
+                                console.log('⚠️ Cookie logged_in không được tìm thấy, đặt lại');
+                                document.cookie = "logged_in=true; path=/; max-age=" + (3600*24*30);
+                                
+                                // Kiểm tra lại sau khi đặt
+                                setTimeout(function() {
+                                    const recheckedCookie = getCookie('logged_in');
+                                    console.log('🔄 Kiểm tra lại cookie - logged_in:', recheckedCookie);
+                                    redirectToHome();
+                                }, 100);
+                            } else {
+                                redirectToHome();
+                            }
+                        }, 300); // Đợi 300ms để đảm bảo cookie được lưu
+                    },
+                    error: function(xhr) {
+                        // Hiện thông báo lỗi đăng nhập
+                        console.error('❌ Lỗi đăng nhập:', xhr.responseJSON);
+                        
+                        let message = 'Đăng nhập thất bại';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            message = xhr.responseJSON.message;
+                        }
+                        
+                        $('#login-error').html('<div class="alert alert-danger">' + message + '</div>');
+                    }
+                });
+            });
+            
+            // Chuyển hướng về trang chủ
+            function redirectToHome() {
+                console.log('🏠 Chuyển hướng về trang chủ');
+                $('#login-error').html('<div class="alert alert-success">Đăng nhập thành công! Đang chuyển hướng...</div>');
+                window.location.href = '/';
+            }
+        });
+    </script>
+</body>
+</html> 

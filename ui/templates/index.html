@@ -5,13 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quản lý Backup Database</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container my-4">
         <div class="card shadow-sm">
-            <div class="card-header bg-primary text-white">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                 <h1 class="h3 mb-0">Công cụ Backup và Upload Database</h1>
+                <div id="auth-section">
+                    <div id="logged-out" class="d-none">
+                        <a href="/login" class="btn btn-sm btn-light">
+                            <i class="bi bi-box-arrow-in-right"></i> Đăng nhập
+                        </a>
+                    </div>
+                    <div id="logged-in" class="d-none">
+                        <div class="dropdown">
+                            <button class="btn btn-sm btn-light dropdown-toggle" type="button" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="bi bi-person-circle"></i> <span id="username-display"></span>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                                <li><a class="dropdown-item" href="#" id="logout-btn"><i class="bi bi-box-arrow-right"></i> Đăng xuất</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="card-body">
                 {{if .NeedAuth}}
@@ -33,7 +51,7 @@
                             </div>
                             <div class="card-body">
                                 <p>Tạo bản sao lưu dữ liệu từ container Docker và lưu vào thư mục local.</p>
-                                <form action="/dump" method="POST">
+                                <form action="/dump" method="POST" class="auth-required-form">
                                     <button type="submit" class="btn btn-primary">Dump Database</button>
                                 </form>
                             </div>
@@ -47,10 +65,10 @@
                             <div class="card-body">
                                 <p>Upload file backup mới nhất hoặc tất cả các file backup lên Google Drive.</p>
                                 <div class="d-flex gap-2">
-                                    <form action="/upload-last" method="POST">
+                                    <form action="/upload-last" method="POST" class="auth-required-form">
                                         <button type="submit" class="btn btn-success" {{if .NeedAuth}}disabled{{end}}>Upload File Mới Nhất</button>
                                     </form>
-                                    <form action="/upload-all" method="POST">
+                                    <form action="/upload-all" method="POST" class="auth-required-form">
                                         <button type="submit" class="btn btn-outline-success" {{if .NeedAuth}}disabled{{end}}>Upload Tất Cả</button>
                                     </form>
                                 </div>
@@ -96,9 +114,9 @@
                                         </td>
                                         <td>
                                             <div class="btn-group btn-group-sm">
-                                                <a href="/download/{{.ID}}" class="btn btn-outline-primary">Tải xuống</a>
+                                                <a href="/download/{{.ID}}" class="btn btn-outline-primary auth-required-btn">Tải xuống</a>
                                                 {{if not .Uploaded}}
-                                                <form action="/upload/{{.ID}}" method="POST">
+                                                <form action="/upload/{{.ID}}" method="POST" class="auth-required-form">
                                                     <button type="submit" class="btn btn-outline-success">Upload</button>
                                                 </form>
                                                 {{end}}
@@ -130,6 +148,246 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/static/js/script.js"></script>
     <script>
+        // Kiểm tra tình trạng đăng nhập khi tải trang
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, checking login status');
+            console.log('Current cookies:', document.cookie);
+            console.log('localStorage.auth_token:', localStorage.getItem('auth_token'));
+            
+            // Kiểm tra đăng nhập ngay khi trang tải
+            if (!isUserLoggedIn()) {
+                console.log('❌ User not logged in, redirecting to login page');
+                window.location.href = '/login';
+                return;
+            }
+            
+            // Nếu đã đăng nhập, tiếp tục khởi tạo trang
+            console.log('✅ User is logged in, initializing page');
+            setupUI();
+            setupAuthForms();
+            
+            // Kiểm tra định kỳ trạng thái đăng nhập
+            startLoginCheck();
+        });
+        
+        // Kiểm tra xem người dùng đã đăng nhập chưa
+        function isUserLoggedIn() {
+            // Kiểm tra nhiều nguồn xác thực
+            const localToken = localStorage.getItem('auth_token');
+            const loginCookie = getCookie('logged_in');
+            const authTokenCookie = getCookie('auth_token');
+            
+            console.log('Auth check: localStorage token=', !!localToken, 
+                       ', logged_in cookie=', loginCookie, 
+                       ', auth_token cookie=', !!authTokenCookie);
+            
+            // Nếu có bất kỳ phương thức xác thực nào, coi như đã đăng nhập
+            const isLoggedIn = !!localToken || loginCookie === 'true' || !!authTokenCookie;
+            console.log('Logged in status:', isLoggedIn);
+            
+            // Nếu có trạng thái trái ngược nhau, đồng bộ lại
+            if (isLoggedIn) {
+                // Nếu đã đăng nhập nhưng thiếu cookie, thử đặt lại cookie
+                if (loginCookie !== 'true' && localToken) {
+                    console.log('Missing logged_in cookie but has token, setting cookie');
+                    document.cookie = "logged_in=true; path=/; max-age=" + (3600*24*30);
+                }
+                
+                // Nếu không có token trong localStorage nhưng có auth_token cookie
+                if (!localToken && authTokenCookie) {
+                    console.log('Missing localStorage token but has auth_token cookie');
+                    // Không thể lấy token từ httpOnly cookie, nhưng vẫn đánh dấu là đã đăng nhập
+                }
+            }
+            
+            return isLoggedIn;
+        }
+        
+        // Thiết lập giao diện người dùng dựa trên trạng thái đăng nhập
+        function setupUI() {
+            const token = localStorage.getItem('auth_token');
+            const userSection = document.getElementById('logged-in');
+            const loginSection = document.getElementById('logged-out');
+            
+            if (token) {
+                try {
+                    // Đảm bảo user data hợp lệ
+                    const userData = localStorage.getItem('user');
+                    const user = userData ? JSON.parse(userData) : null;
+                    
+                    if (!user || !user.username) {
+                        throw new Error('Invalid user data');
+                    }
+                    
+                    // Hiển thị phần đã đăng nhập
+                    userSection.classList.remove('d-none');
+                    loginSection.classList.add('d-none');
+                    
+                    // Hiển thị tên người dùng
+                    document.getElementById('username-display').textContent = user.username;
+                    
+                    // Bật các phần tử yêu cầu xác thực
+                    enableAuthRequiredElements();
+                    
+                } catch (error) {
+                    console.error('Error processing user data:', error);
+                    userSection.classList.add('d-none');
+                    loginSection.classList.remove('d-none');
+                    disableAuthRequiredElements();
+                }
+            } else {
+                userSection.classList.add('d-none');
+                loginSection.classList.remove('d-none');
+                disableAuthRequiredElements();
+            }
+        }
+        
+        // Bắt đầu kiểm tra định kỳ trạng thái đăng nhập
+        function startLoginCheck() {
+            let checkCount = 0;
+            
+            // Kiểm tra cookie theo định kỳ
+            setInterval(function() {
+                // Kiểm tra tất cả các nguồn xác thực
+                const localToken = localStorage.getItem('auth_token');
+                const loginCookie = getCookie('logged_in');
+                const authTokenCookie = getCookie('auth_token');
+                
+                // Để giảm log, chỉ log định kỳ
+                checkCount++;
+                if (checkCount % 10 === 0) {
+                    console.log('📊 Auth status - LocalStorage:', !!localToken, 
+                               'Cookie logged_in:', loginCookie, 
+                               'Cookie auth_token:', !!authTokenCookie);
+                }
+                
+                // Kiểm tra sự mất đồng bộ giữa các phương thức xác thực
+                const hasSomeAuth = !!localToken || loginCookie === 'true' || !!authTokenCookie;
+                
+                // Nếu không có bất kỳ phương thức xác thực nào còn lại, hãy đăng xuất
+                if (!hasSomeAuth && checkCount > 5) { // Bỏ qua vài lần kiểm tra đầu tiên để tránh race condition
+                    console.log('⚠️ Không còn phương thức xác thực nào, đăng xuất');
+                    // Đảm bảo xóa mọi dấu vết đăng nhập
+                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('user');
+                    document.cookie = "logged_in=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+                    document.cookie = "auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+                    
+                    // Reload để tránh lỗi redirect loop
+                    window.location.reload();
+                    return;
+                }
+                
+                // Nếu có một số xác thực nhưng không nhất quán, thử khôi phục
+                if (hasSomeAuth) {
+                    // Nếu có token nhưng không có cookie logged_in, thử đặt lại cookie
+                    if (loginCookie !== 'true' && (localToken || authTokenCookie)) {
+                        console.log('🔄 Khôi phục cookie logged_in');
+                        document.cookie = "logged_in=true; path=/; max-age=" + (3600*24*30);
+                    }
+                    
+                    // Nếu có cookie auth nhưng không có localStorage, thử khôi phục từ cookie
+                    if (!localToken && (loginCookie === 'true' || authTokenCookie)) {
+                        // Không thể truy cập giá trị từ httpOnly cookie, 
+                        // nhưng có thể yêu cầu từ server thông qua API nếu cần
+                        console.log('⚠️ Thiếu token trong localStorage nhưng có cookie xác thực');
+                    }
+                }
+            }, 30000); // Kiểm tra mỗi 30 giây
+        }
+        
+        // Lấy giá trị cookie theo tên
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return null;
+        }
+        
+        // Thiết lập sự kiện đăng xuất
+        document.getElementById('logout-btn').addEventListener('click', async function(e) {
+            e.preventDefault();
+            
+            try {
+                // Gọi API đăng xuất
+                const response = await fetch('/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    }
+                });
+                
+                if (response.ok) {
+                    // Xóa token và thông tin người dùng từ localStorage
+                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('user');
+                    
+                    // Cập nhật giao diện
+                    setupUI();
+                    
+                    // Chuyển hướng về trang đăng nhập
+                    window.location.href = '/login';
+                } else {
+                    console.error('Đăng xuất thất bại');
+                }
+            } catch (error) {
+                console.error('Lỗi khi đăng xuất:', error);
+            }
+        });
+        
+        // Thiết lập sự kiện cho các form yêu cầu xác thực
+        function setupAuthForms() {
+            document.querySelectorAll('.auth-required-form').forEach(form => {
+                form.addEventListener('submit', function(e) {
+                    const token = localStorage.getItem('auth_token');
+                    if (!token) {
+                        e.preventDefault();
+                        alert('Vui lòng đăng nhập để thực hiện thao tác này');
+                        window.location.href = '/login';
+                        return;
+                    }
+                    
+                    // Thêm header Authorization cho form submit
+                    const headerInput = document.createElement('input');
+                    headerInput.type = 'hidden';
+                    headerInput.name = 'Authorization';
+                    headerInput.value = 'Bearer ' + token;
+                    form.appendChild(headerInput);
+                });
+            });
+            
+            document.querySelectorAll('.auth-required-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    const token = localStorage.getItem('auth_token');
+                    if (!token) {
+                        e.preventDefault();
+                        alert('Vui lòng đăng nhập để thực hiện thao tác này');
+                        window.location.href = '/login';
+                        return;
+                    }
+                    
+                    // Thêm token vào URL
+                    const originalHref = btn.getAttribute('href');
+                    const separator = originalHref.includes('?') ? '&' : '?';
+                    btn.setAttribute('href', originalHref + separator + 'token=' + token);
+                });
+            });
+        }
+        
+        // Bật các phần tử yêu cầu xác thực
+        function enableAuthRequiredElements() {
+            document.querySelectorAll('.auth-required-form button').forEach(btn => {
+                btn.disabled = false;
+            });
+        }
+        
+        // Tắt các phần tử yêu cầu xác thực
+        function disableAuthRequiredElements() {
+            document.querySelectorAll('.auth-required-form button').forEach(btn => {
+                btn.disabled = true;
+            });
+        }
+        
         function openAuthWindow() {
             // Mở cửa sổ mới để xác thực Google
             const authWindow = window.open("/auth", "GoogleAuth", 

@@ -2,11 +2,15 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/backup-cronjob/internal/auth"
 	"github.com/backup-cronjob/internal/config"
+	"github.com/backup-cronjob/internal/database"
 	"github.com/backup-cronjob/internal/dbdump"
 	"github.com/backup-cronjob/internal/drive"
 	"github.com/backup-cronjob/internal/models"
@@ -22,6 +26,14 @@ type Handler struct {
 
 // NewHandler tạo instance mới của Handler
 func NewHandler(cfg *config.Config) *Handler {
+	// Khởi tạo authentication
+	auth.Init(cfg)
+
+	// Khởi tạo database
+	if err := database.InitDB(cfg); err != nil {
+		panic(fmt.Sprintf("Failed to initialize database: %v", err))
+	}
+
 	return &Handler{
 		Config:         cfg,
 		DatabaseDumper: dbdump.NewDatabaseDumper(cfg),
@@ -37,39 +49,90 @@ type OperationResult struct {
 
 // IndexHandler xử lý trang chủ
 func (h *Handler) IndexHandler(c *gin.Context) {
-	// Kiểm tra đã xác thực Google Drive chưa
-	isAuthenticated := h.DriveUploader.CheckAuth()
+	log.Printf("IndexHandler - Đang xử lý request từ %s", c.Request.RemoteAddr)
 
-	// Nếu chưa xác thực và cần upload, chuyển đến trang xác thực
-	if !isAuthenticated {
-		c.HTML(http.StatusOK, "index.html", gin.H{
-			"NeedAuth": true,
-		})
-		return
-	}
+	// Kiểm tra các phương thức xác thực khác nhau
+	cookieValue, _ := c.Cookie("logged_in")
+	authToken, _ := c.Cookie("auth_token")
+	authHeader := c.GetHeader("Authorization")
 
-	// Lấy danh sách các file backup
-	backups, err := models.GetAllBackups(h.Config.BackupDir)
-	if err != nil {
-		c.HTML(http.StatusOK, "index.html", gin.H{
-			"Error": fmt.Sprintf("Không thể lấy danh sách backup: %v", err),
-		})
-		return
-	}
+	log.Printf("Auth check: logged_in cookie=[%s], auth_token cookie exists=[%v], auth header exists=[%v]",
+		cookieValue, authToken != "", authHeader != "")
 
-	// Lấy kết quả thao tác từ session nếu có
-	var lastOperation *OperationResult
-	if flashes := c.Request.URL.Query().Get("success"); flashes != "" {
-		lastOperation = &OperationResult{
-			Success: flashes == "true",
-			Message: c.Request.URL.Query().Get("message"),
+	// Nếu có bất kỳ phương thức xác thực hợp lệ nào, cho phép truy cập
+	if cookieValue == "true" || authToken != "" || authHeader != "" {
+		log.Printf("✅ User authenticated via: %s", getAuthMethod(cookieValue, authToken, authHeader))
+
+		// Nếu có auth token cookie nhưng không có logged_in cookie, đặt logged_in cookie
+		if authToken != "" && cookieValue != "true" {
+			log.Printf("Setting logged_in cookie from auth_token cookie")
+			c.SetCookie("logged_in", "true", 3600*24*30, "/", "", false, false)
+			c.SetSameSite(http.SameSiteLaxMode)
 		}
+
+		// Hiển thị trang chính
+		// Kiểm tra đã xác thực Google Drive chưa
+		isAuthenticated := h.DriveUploader.CheckAuth()
+
+		// Hiển thị trang chủ với trạng thái xác thực Google Drive
+		if !isAuthenticated {
+			c.HTML(http.StatusOK, "index.html", gin.H{
+				"NeedAuth": true,
+			})
+			return
+		}
+
+		// Lấy danh sách các file backup
+		backups, err := models.GetAllBackups(h.Config.BackupDir)
+		if err != nil {
+			c.HTML(http.StatusOK, "index.html", gin.H{
+				"Error": fmt.Sprintf("Không thể lấy danh sách backup: %v", err),
+			})
+			return
+		}
+
+		// Lấy kết quả thao tác từ session nếu có
+		var lastOperation *OperationResult
+		if flashes := c.Request.URL.Query().Get("success"); flashes != "" {
+			lastOperation = &OperationResult{
+				Success: flashes == "true",
+				Message: c.Request.URL.Query().Get("message"),
+			}
+		}
+
+		c.HTML(http.StatusOK, "index.html", gin.H{
+			"Backups":       backups,
+			"LastOperation": lastOperation,
+		})
+		return
 	}
 
-	c.HTML(http.StatusOK, "index.html", gin.H{
-		"Backups":       backups,
-		"LastOperation": lastOperation,
-	})
+	// Chưa xác thực, chuyển hướng đến trang đăng nhập
+	log.Printf("❌ User not authenticated, redirecting to login page")
+	c.Redirect(http.StatusFound, "/login")
+}
+
+// getAuthMethod trả về phương thức xác thực được sử dụng
+func getAuthMethod(cookieValue, authToken, authHeader string) string {
+	methods := []string{}
+
+	if cookieValue == "true" {
+		methods = append(methods, "logged_in cookie")
+	}
+
+	if authToken != "" {
+		methods = append(methods, "auth_token cookie")
+	}
+
+	if authHeader != "" {
+		methods = append(methods, "Authorization header")
+	}
+
+	if len(methods) == 0 {
+		return "unknown"
+	}
+
+	return strings.Join(methods, ", ")
 }
 
 // AuthHandler xử lý trang xác thực
@@ -107,6 +170,13 @@ func (h *Handler) OAuthCallbackHandler(c *gin.Context) {
 
 // DumpHandler xử lý yêu cầu dump database
 func (h *Handler) DumpHandler(c *gin.Context) {
+	// Kiểm tra xác thực JWT từ local storage
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.Redirect(http.StatusSeeOther, "/?success=false&message=Vui lòng đăng nhập để thực hiện thao tác này")
+		return
+	}
+
 	// Thực hiện dump database
 	result, err := h.DatabaseDumper.DumpDatabase()
 	if err != nil {
@@ -119,7 +189,14 @@ func (h *Handler) DumpHandler(c *gin.Context) {
 
 // UploadLastHandler xử lý yêu cầu upload file mới nhất
 func (h *Handler) UploadLastHandler(c *gin.Context) {
-	// Kiểm tra xác thực
+	// Kiểm tra xác thực JWT
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.Redirect(http.StatusSeeOther, "/?success=false&message=Vui lòng đăng nhập để thực hiện thao tác này")
+		return
+	}
+
+	// Kiểm tra xác thực Google Drive
 	if !h.DriveUploader.CheckAuth() {
 		c.Redirect(http.StatusSeeOther, "/auth")
 		return
@@ -144,7 +221,14 @@ func (h *Handler) UploadLastHandler(c *gin.Context) {
 
 // UploadAllHandler xử lý yêu cầu upload tất cả file
 func (h *Handler) UploadAllHandler(c *gin.Context) {
-	// Kiểm tra xác thực
+	// Kiểm tra xác thực JWT
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.Redirect(http.StatusSeeOther, "/?success=false&message=Vui lòng đăng nhập để thực hiện thao tác này")
+		return
+	}
+
+	// Kiểm tra xác thực Google Drive
 	if !h.DriveUploader.CheckAuth() {
 		c.Redirect(http.StatusSeeOther, "/auth")
 		return
@@ -162,7 +246,14 @@ func (h *Handler) UploadAllHandler(c *gin.Context) {
 
 // UploadSingleHandler xử lý yêu cầu upload một file cụ thể
 func (h *Handler) UploadSingleHandler(c *gin.Context) {
-	// Kiểm tra xác thực
+	// Kiểm tra xác thực JWT
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.Redirect(http.StatusSeeOther, "/?success=false&message=Vui lòng đăng nhập để thực hiện thao tác này")
+		return
+	}
+
+	// Kiểm tra xác thực Google Drive
 	if !h.DriveUploader.CheckAuth() {
 		c.Redirect(http.StatusSeeOther, "/auth")
 		return
@@ -201,6 +292,20 @@ func (h *Handler) UploadSingleHandler(c *gin.Context) {
 
 // DownloadHandler xử lý yêu cầu tải xuống file backup
 func (h *Handler) DownloadHandler(c *gin.Context) {
+	// Kiểm tra xác thực JWT từ query parameter (từ client javascript)
+	token := c.Query("token")
+	if token == "" {
+		c.Redirect(http.StatusSeeOther, "/?success=false&message=Vui lòng đăng nhập để thực hiện thao tác này")
+		return
+	}
+
+	// Xác thực token
+	_, err := auth.ValidateJWT(token)
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/?success=false&message=Phiên đăng nhập không hợp lệ hoặc đã hết hạn")
+		return
+	}
+
 	fileID := c.Param("id")
 	backups, err := models.GetAllBackups(h.Config.BackupDir)
 	if err != nil {

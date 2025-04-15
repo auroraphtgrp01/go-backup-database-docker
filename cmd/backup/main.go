@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/backup-cronjob/internal/auth"
 	"github.com/backup-cronjob/internal/config"
 	"github.com/backup-cronjob/internal/dbdump"
 	"github.com/backup-cronjob/internal/drive"
@@ -141,6 +142,19 @@ func startWebApp(cfg *config.Config, port string) {
 	// Thêm các route xác thực Google
 	router.GET("/auth", h.AuthHandler)
 	router.GET("/callback", h.OAuthCallbackHandler)
+
+	// Thêm các route xác thực JWT
+	router.GET("/login", h.LoginPageHandler)
+	router.POST("/login", h.LoginHandler)
+	router.POST("/logout", h.LogoutHandler)
+
+	// Nhóm các route yêu cầu xác thực
+	authorized := router.Group("/api")
+	authorized.Use(auth.AuthMiddleware())
+	{
+		authorized.GET("/me", h.MeHandler)
+		// Thêm các API route khác cần xác thực ở đây
+	}
 
 	// Khởi động server
 	if err := router.Run(":" + port); err != nil {
